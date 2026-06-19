@@ -1,0 +1,6 @@
+{
+  "name": "GuardianEye",
+  "description": "An AI-powered parental control application designed to keep Nigerian and West African children safe online through smart monitoring, content filtering, and prompt safety alerts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

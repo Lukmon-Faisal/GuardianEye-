@@ -1,4 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { doc, getDoc, setDoc, updateDoc, collection, onSnapshot, getDocs } from "firebase/firestore";
+import { db } from "./firebase";
 import { SecurityAlert, TrackedContact, Child } from "../types";
 
 // Setup API key with fallback to what Vite embeds or direct process.env
@@ -166,18 +168,148 @@ const saveToStorage = <T>(key: string, value: T): void => {
   }
 };
 
-// Database API Methods (All operations persisted locally in browser)
+// Retrieve the active pairing code from local storage
+export const getActivePairingCode = (): string => {
+  try {
+    return localStorage.getItem("guardianeye_active_pairing_code") || "";
+  } catch {
+    return "";
+  }
+};
+
+export const syncAlertToFirestore = async (alert: SecurityAlert) => {
+  const code = getActivePairingCode();
+  if (code) {
+    try {
+      await setDoc(doc(db, "pairings", code, "alerts", alert.id), alert);
+    } catch (err) {
+      console.warn("Failed to sync alert to Firestore:", err);
+    }
+  }
+};
+
+export const syncContactToFirestore = async (contact: TrackedContact) => {
+  const code = getActivePairingCode();
+  if (code) {
+    try {
+      await setDoc(doc(db, "pairings", code, "contacts", contact.id), contact);
+    } catch (err) {
+      console.warn("Failed to sync contact to Firestore:", err);
+    }
+  }
+};
+
+export const createPairingSession = async (code: string) => {
+  const docRef = doc(db, "pairings", code);
+  await setDoc(docRef, {
+    code,
+    paired: false,
+    timestamp: Date.now(),
+    childSessionId: "",
+    settings: getSettings()
+  });
+
+  // Seed default alerts and contacts in Firestore so newly connected parent gets completed visual state
+  const defaultAlerts = getAlerts();
+  for (const alert of defaultAlerts) {
+    await setDoc(doc(db, "pairings", code, "alerts", alert.id), alert);
+  }
+
+  const defaultContacts = getContacts();
+  for (const contact of defaultContacts) {
+    await setDoc(doc(db, "pairings", code, "contacts", contact.id), contact);
+  }
+};
+
+export const pairChildDevice = async (code: string, childSessionId: string) => {
+  const docRef = doc(db, "pairings", code);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) {
+    throw new Error("Pairing session not found in database. Double-check the PIN on the Parent App.");
+  }
+  await updateDoc(docRef, {
+    paired: true,
+    childSessionId,
+    timestamp: Date.now()
+  });
+  return snap.data();
+};
+
+export const subscribeToPairing = (code: string, callback: (data: any) => void) => {
+  const docRef = doc(db, "pairings", code);
+  return onSnapshot(docRef, (snap) => {
+    if (snap.exists()) {
+      callback(snap.data());
+    }
+  });
+};
+
+export const subscribeToAlerts = (code: string, callback: (alerts: SecurityAlert[]) => void) => {
+  const colRef = collection(db, "pairings", code, "alerts");
+  return onSnapshot(colRef, (snap) => {
+    const alertsList: SecurityAlert[] = [];
+    snap.forEach((doc) => {
+      alertsList.push(doc.data() as SecurityAlert);
+    });
+    alertsList.sort((a, b) => {
+      if (a.isSOS && !b.isSOS) return -1;
+      if (!a.isSOS && b.isSOS) return 1;
+      return b.id.localeCompare(a.id);
+    });
+    callback(alertsList);
+  });
+};
+
+export const subscribeToContacts = (code: string, callback: (contacts: TrackedContact[]) => void) => {
+  const colRef = collection(db, "pairings", code, "contacts");
+  return onSnapshot(colRef, (snap) => {
+    const contactsList: TrackedContact[] = [];
+    snap.forEach((doc) => {
+      contactsList.push(doc.data() as TrackedContact);
+    });
+    contactsList.sort((a, b) => a.name.localeCompare(b.name));
+    callback(contactsList);
+  });
+};
+
+// Database API Methods (All operations persisted locally in browser with optional automatic Firestore mirror)
 export const getSettings = () => loadFromStorage("guardian_settings", DEFAULT_SETTINGS);
 export const saveSettings = (settings: typeof DEFAULT_SETTINGS) => {
   saveToStorage("guardian_settings", settings);
+  const code = getActivePairingCode();
+  if (code) {
+    setDoc(doc(db, "pairings", code), { settings }, { merge: true }).catch(err => {
+      console.warn("Failed to sync settings:", err);
+    });
+  }
   return settings;
 };
 
 export const getAlerts = (): SecurityAlert[] => loadFromStorage("guardian_alerts", DEFAULT_ALERTS);
-export const saveAlerts = (alerts: SecurityAlert[]) => saveToStorage("guardian_alerts", alerts);
+export const saveAlerts = (alerts: SecurityAlert[]) => {
+  saveToStorage("guardian_alerts", alerts);
+  const code = getActivePairingCode();
+  if (code) {
+    for (const alert of alerts) {
+      setDoc(doc(db, "pairings", code, "alerts", alert.id), alert).catch(err => {
+        console.warn("Failed to sync alert:", err);
+      });
+    }
+  }
+};
 
 export const getContacts = (): TrackedContact[] => loadFromStorage("guardian_contacts", DEFAULT_CONTACTS);
-export const saveContacts = (contacts: TrackedContact[]) => saveToStorage("guardian_contacts", contacts);
+export const saveContacts = (contacts: TrackedContact[]) => {
+  saveToStorage("guardian_contacts", contacts);
+  const code = getActivePairingCode();
+  if (code) {
+    for (const contact of contacts) {
+      setDoc(doc(db, "pairings", code, "contacts", contact.id), contact).catch(err => {
+        console.warn("Failed to sync contact:", err);
+      });
+    }
+  }
+};
 
 export const isChildConnected = (): boolean => loadFromStorage("guardian_child_connected", false);
 export const setChildConnected = (connected: boolean) => {

@@ -21,7 +21,10 @@ import {
   resolveAlert, 
   updateContactStatus, 
   resetDb, 
-  setChildConnected as setChildConnectedInApi 
+  setChildConnected as setChildConnectedInApi,
+  subscribeToPairing,
+  subscribeToAlerts,
+  subscribeToContacts 
 } from "./lib/api";
 
 export default function App() {
@@ -37,7 +40,13 @@ export default function App() {
   const [childrenList, setChildrenList] = useState<Child[]>([]);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
   const [childConnected, setChildConnected] = useState(false);
-  const [activePairingCode, setActivePairingCode] = useState<string>("102833");
+  const [activePairingCode, setActivePairingCode] = useState<string>(() => {
+    try {
+      return localStorage.getItem("guardianeye_active_pairing_code") || "102833";
+    } catch {
+      return "102833";
+    }
+  });
   const [networkLoading, setNetworkLoading] = useState(false);
   const [toast, setToast] = useState<{ id: string; title: string; message: string; type: string } | null>(null);
 
@@ -50,17 +59,60 @@ export default function App() {
     try {
       const statusData = getStatus();
       setChildrenList(statusData.children || []);
-      setChildConnected(statusData.childConnected);
 
-      const alertsData = getAlerts();
+      if (!activePairingCode) {
+        setChildConnected(statusData.childConnected);
+        const alertsData = getAlerts();
+        setAlerts(alertsData || []);
+        const contactsData = getContacts();
+        setContacts(contactsData || []);
+      }
+    } catch (e) {
+      console.error("Networking error syncing server state:", e);
+    } finally {
+      setNetworkLoading(false);
+    }
+  };
 
-      const contactsData = getContacts();
-      setContacts(contactsData || []);
+  useEffect(() => {
+    fetchState();
+  }, [role]);
 
-      // Determine if there is a new unresolved alert that wasn't previously loaded
-      if (alertsRef.current.length > 0) {
+  // Save active pairing code to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem("guardianeye_active_pairing_code", activePairingCode);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [activePairingCode]);
+
+  // Firestore real-time synchronization listeners
+  useEffect(() => {
+    if (!activePairingCode) return;
+
+    // Real-time listener for pairing session
+    const unsubPairing = subscribeToPairing(activePairingCode, (dataFromFirebase) => {
+      if (dataFromFirebase) {
+        if (dataFromFirebase.paired !== undefined) {
+          setChildConnected(dataFromFirebase.paired);
+          setChildConnectedInApi(dataFromFirebase.paired);
+        }
+        if (dataFromFirebase.settings) {
+          try {
+            localStorage.setItem("guardian_settings", JSON.stringify(dataFromFirebase.settings));
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+    });
+
+    // Real-time listener for alerts subcollection
+    const unsubAlerts = subscribeToAlerts(activePairingCode, (alertsList) => {
+      if (alertsRef.current.length > 0 && alertsList.length > 0) {
         const prevIds = new Set(alertsRef.current.map(a => a.id));
-        const newUnresolved = alertsData.find(a => !prevIds.has(a.id) && !a.resolved);
+        const newUnresolved = alertsList.find(a => !prevIds.has(a.id) && !a.resolved);
         if (newUnresolved) {
           let alertType = "Chat";
           if (newUnresolved.isSOS) {
@@ -85,27 +137,31 @@ export default function App() {
         }
       }
 
-      alertsRef.current = alertsData;
-      setAlerts(alertsData || []);
-    } catch (e) {
-      console.error("Networking error syncing server state:", e);
-    } finally {
-      setNetworkLoading(false);
-    }
-  };
+      alertsRef.current = alertsList;
+      setAlerts(alertsList);
+      try {
+        localStorage.setItem("guardian_alerts", JSON.stringify(alertsList));
+      } catch (e) {
+        console.error(e);
+      }
+    });
 
-  useEffect(() => {
-    fetchState();
-  }, [role]);
+    // Real-time listener for contacts subcollection
+    const unsubContacts = subscribeToContacts(activePairingCode, (contactsList) => {
+      setContacts(contactsList);
+      try {
+        localStorage.setItem("guardian_contacts", JSON.stringify(contactsList));
+      } catch (e) {
+        console.error(e);
+      }
+    });
 
-  // Poll alerts every 4 seconds when role is parent to catch newly generated alerts and show notifications
-  useEffect(() => {
-    if (role !== "parent") return;
-    const interval = setInterval(() => {
-      fetchState();
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [role, alerts.map(a => `${a.id}-${a.resolved}`).join(",")]);
+    return () => {
+      unsubPairing();
+      unsubAlerts();
+      unsubContacts();
+    };
+  }, [activePairingCode]);
 
   // Handle manual alert simulations
   const handleSimulateNewAlert = async (

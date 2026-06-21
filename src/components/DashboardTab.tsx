@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import { Child, SecurityAlert } from "../types";
-import { getWeeklySummaryAI } from "../lib/api";
+import { getWeeklySummaryAI, createPairingSession } from "../lib/api";
 
 interface DashboardTabProps {
   childrenData: Child[];
@@ -102,6 +102,11 @@ export default function DashboardTab({
     setGeneratingCode(true);
     // Secure 6-digit random code generation (Parent view)
     const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
+    try {
+      await createPairingSession(randomCode);
+    } catch (e) {
+      console.error("Failed to register pairing session in Firebase:", e);
+    }
     setPairingCode(randomCode);
     setActivePairingCode(randomCode);
     setGeneratingCode(false);

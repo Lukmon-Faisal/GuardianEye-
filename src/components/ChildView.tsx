@@ -5,7 +5,7 @@ import {
   Smartphone, HelpCircle, Lock, EyeOff, UserX
 } from "lucide-react";
 import { TrackedContact } from "../types";
-import { triggerSOS, pairDevice, analyzeMessageAI, analyzeImageAI, analyzeCommentAI } from "../lib/api";
+import { triggerSOS, pairDevice, pairChildDevice, analyzeMessageAI, analyzeImageAI, analyzeCommentAI } from "../lib/api";
 
 interface ChildViewProps {
   childConnected: boolean;
@@ -438,14 +438,9 @@ export default function ChildView({
       return;
     }
 
-    if (code !== activePairingCode) {
-      setErrorMsg(`Incorrect code. The active pairing PIN is "${activePairingCode}". Input this code to pair successfully.`);
-      return;
-    }
-
     setSubmitting(true);
     setErrorMsg("");
-    setPairingProgress("Verifying pairing credentials...");
+    setPairingProgress("Verifying pairing credentials with Firestore...");
 
     // Simulated multi-step realistic pairing delay
     setTimeout(() => {
@@ -458,11 +453,22 @@ export default function ChildView({
 
     setTimeout(async () => {
       try {
+        const childSessionId = "child-" + Math.random().toString(36).substring(2, 8);
+        await pairChildDevice(code, childSessionId);
+        
+        // Success! Keep track of pairing code in local storage
+        localStorage.setItem("guardianeye_active_pairing_code", code);
         pairDevice(code);
         onPairSuccess();
-      } catch (err) {
-        console.error(err);
-        onPairSuccess();
+      } catch (err: any) {
+        console.warn("Firestore pairing failed, checking fallback activePairingCode:", err);
+        if (code === activePairingCode) {
+          localStorage.setItem("guardianeye_active_pairing_code", code);
+          pairDevice(code);
+          onPairSuccess();
+        } else {
+          setErrorMsg("Pairing code not found or expired on Firebase. Please generate a new code on the Parent App first.");
+        }
       } finally {
         setSubmitting(false);
         setPairingProgress("");
@@ -482,7 +488,16 @@ export default function ChildView({
     setTimeout(() => {
       setQrMessage("Authorizing certificate handshakes and securing Protect Tunnel...");
     }, 2400);
-    setTimeout(() => {
+    setTimeout(async () => {
+      try {
+        const childSessionId = "child-qr-" + Math.random().toString(36).substring(2, 8);
+        await pairChildDevice(activePairingCode, childSessionId);
+        localStorage.setItem("guardianeye_active_pairing_code", activePairingCode);
+      } catch (err) {
+        console.warn("QR Firebase pairing failed:", err);
+        localStorage.setItem("guardianeye_active_pairing_code", activePairingCode);
+      }
+      pairDevice(activePairingCode);
       onPairSuccess();
       setShowQRScannerSim(false);
     }, 3200);

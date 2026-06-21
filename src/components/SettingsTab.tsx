@@ -3,6 +3,7 @@ import {
   Settings, Lock, Eye, Volume2, ShieldAlert, Check, 
   Smartphone, UserCheck, Shield, BookOpen, Clock, AlertTriangle 
 } from "lucide-react";
+import { getSettings, saveSettings } from "../lib/api";
 
 interface SettingsTabProps {
   onReplayOnboarding?: () => void;
@@ -28,25 +29,22 @@ export default function SettingsTab({ onReplayOnboarding }: SettingsTabProps) {
 
   useEffect(() => {
     // Fetch settings on mount
-    const fetchSettings = async () => {
+    const fetchSettings = () => {
       try {
-        const res = await fetch("/api/settings");
-        if (res.ok) {
-          const data = await res.json();
-          setSafetyPolicies({
-            cyberbullying: data.cyberbullying ?? true,
-            groomingDetection: data.groomingDetection ?? true,
-            gamblingBlocking: data.gamblingBlocking ?? true,
-            examLeakFilter: data.examLeakFilter ?? false,
-            naijaSlangAudit: data.naijaSlangAudit ?? true
-          });
-          setCurfews({
-            schoolHoursLock: data.schoolHoursLock ?? true,
-            sleepLock: data.sleepLock ?? true
-          });
-          setCarrierSafeDNS(data.carrierSafeDNS ?? true);
-          setSensitivity(data.sensitivity ?? "Medium");
-        }
+        const data = getSettings();
+        setSafetyPolicies({
+          cyberbullying: data.cyberbullying ?? true,
+          groomingDetection: data.groomingDetection ?? true,
+          gamblingBlocking: data.gamblingBlocking ?? true,
+          examLeakFilter: data.examLeakFilter ?? false,
+          naijaSlangAudit: data.naijaSlangAudit ?? true
+        });
+        setCurfews({
+          schoolHoursLock: data.schoolHoursLock ?? true,
+          sleepLock: data.sleepLock ?? true
+        });
+        setCarrierSafeDNS(data.carrierSafeDNS ?? true);
+        setSensitivity((data.sensitivity as "Low" | "Medium" | "High") ?? "Medium");
       } catch (e) {
         console.error("Error fetching settings:", e);
       }
@@ -76,18 +74,12 @@ export default function SettingsTab({ onReplayOnboarding }: SettingsTabProps) {
         carrierSafeDNS
       };
 
-      const res = await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      saveSettings(payload);
 
-      if (res.ok) {
-        setSuccessMsg("GuardianEye safety regulations updated & synced to child device!");
-        setTimeout(() => {
-          setSuccessMsg("");
-        }, 4000);
-      }
+      setSuccessMsg("GuardianEye safety regulations updated & synced to child device!");
+      setTimeout(() => {
+        setSuccessMsg("");
+      }, 4000);
     } catch (e) {
       console.error("Error saving settings:", e);
     }

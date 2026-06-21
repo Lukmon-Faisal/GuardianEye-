@@ -5,6 +5,7 @@ import {
   Smartphone, HelpCircle, Lock, EyeOff, UserX
 } from "lucide-react";
 import { TrackedContact } from "../types";
+import { triggerSOS, pairDevice, analyzeMessageAI, analyzeImageAI, analyzeCommentAI } from "../lib/api";
 
 interface ChildViewProps {
   childConnected: boolean;
@@ -149,23 +150,18 @@ export default function ChildView({
     setSosSuccess(false);
 
     try {
-      const res = await fetch("/api/sos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-      if (res.ok) {
-        setSosSuccess(true);
-        if (onMessageAnalyzed) {
-          onMessageAnalyzed();
-        }
-        if (onRefreshContacts) {
-          onRefreshContacts();
-        }
-        // Keep active banner feedback for 6 seconds
-        setTimeout(() => {
-          setSosSuccess(false);
-        }, 6000);
+      triggerSOS();
+      setSosSuccess(true);
+      if (onMessageAnalyzed) {
+        onMessageAnalyzed();
       }
+      if (onRefreshContacts) {
+        onRefreshContacts();
+      }
+      // Keep active banner feedback for 6 seconds
+      setTimeout(() => {
+        setSosSuccess(false);
+      }, 6000);
     } catch (e) {
       console.error("SOS trigger error:", e);
     } finally {
@@ -299,32 +295,23 @@ export default function ChildView({
 
     try {
       const contactObj = contacts.find(c => c.id === contactId);
-      const res = await fetch("/api/analyze-message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messageId,
-          text,
-          sender: senderType === "me" ? "Child" : contactObj?.name || "Stranger",
-          contactName: contactObj?.name || "Unfamiliar contact"
-        })
-      });
+      const sender = senderType === "me" ? "Child" : contactObj?.name || "Stranger";
+      const contactName = contactObj?.name || "Unfamiliar contact";
 
-      if (res.ok) {
-        const data = await res.json();
-        setChats(prev => ({
-          ...prev,
-          [contactId]: prev[contactId].map(m => m.id === messageId ? { 
-            ...m, 
-            classification: data.classification,
-            reason: data.reason,
-            loading: false 
-          } : m)
-        }));
+      const data = await analyzeMessageAI(messageId, text, sender, contactName);
 
-        if (data.classification !== "safe" && onMessageAnalyzed) {
-          onMessageAnalyzed();
-        }
+      setChats(prev => ({
+        ...prev,
+        [contactId]: prev[contactId].map(m => m.id === messageId ? { 
+          ...m, 
+          classification: data.classification as any,
+          reason: data.reason,
+          loading: false 
+        } : m)
+      }));
+
+      if (data.classification !== "safe" && onMessageAnalyzed) {
+        onMessageAnalyzed();
       }
     } catch (err) {
       console.error("Failed message safety scan:", err);
@@ -344,33 +331,23 @@ export default function ChildView({
 
     try {
       const contactObj = contacts.find(c => c.id === contactId);
-      const res = await fetch("/api/analyze-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messageId,
-          imageBytes: imageStr,
-          imageName: nameImg,
-          sender: senderType === "me" ? "Child" : contactObj?.name || "Stranger",
-          contactName: contactObj?.name || "Unfamiliar contact"
-        })
-      });
+      const sender = senderType === "me" ? "Child" : contactObj?.name || "Stranger";
+      const contactName = contactObj?.name || "Unfamiliar contact";
 
-      if (res.ok) {
-        const data = await res.json();
-        setChats(prev => ({
-          ...prev,
-          [contactId]: prev[contactId].map(m => m.id === messageId ? { 
-            ...m, 
-            classification: data.classification,
-            reason: data.reason,
-            loading: false 
-          } : m)
-        }));
+      const data = await analyzeImageAI(messageId, imageStr, nameImg, sender, contactName);
 
-        if (data.classification === "flagged for review" && onMessageAnalyzed) {
-          onMessageAnalyzed();
-        }
+      setChats(prev => ({
+        ...prev,
+        [contactId]: prev[contactId].map(m => m.id === messageId ? { 
+          ...m, 
+          classification: data.classification as any,
+          reason: data.reason,
+          loading: false 
+        } : m)
+      }));
+
+      if (data.classification === "flagged for review" && onMessageAnalyzed) {
+        onMessageAnalyzed();
       }
     } catch (err) {
       console.error("Failed image vision scan:", err);
@@ -385,23 +362,16 @@ export default function ChildView({
   const analyzeFeedComment = async (commentId: string, text: string, author: string) => {
     setFeedComments(prev => prev.map(c => c.id === commentId ? { ...c, loading: true } : c));
     try {
-      const res = await fetch("/api/analyze-comment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ commentId, text, author })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setFeedComments(prev => prev.map(c => c.id === commentId ? {
-          ...c,
-          classification: data.classification,
-          reason: data.reason,
-          loading: false
-        } : c));
+      const data = await analyzeCommentAI(commentId, text, author);
+      setFeedComments(prev => prev.map(c => c.id === commentId ? {
+        ...c,
+        classification: data.classification as any,
+        reason: data.reason,
+        loading: false
+      } : c));
 
-        if (data.classification === "bullying/harassment" && onMessageAnalyzed) {
-          onMessageAnalyzed();
-        }
+      if (data.classification === "bullying/harassment" && onMessageAnalyzed) {
+        onMessageAnalyzed();
       }
     } catch (err) {
       console.error("Failed social feed comment scan:", err);
@@ -488,11 +458,7 @@ export default function ChildView({
 
     setTimeout(async () => {
       try {
-        const res = await fetch("/api/pair", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code })
-        });
+        pairDevice(code);
         onPairSuccess();
       } catch (err) {
         console.error(err);

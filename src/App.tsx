@@ -13,6 +13,16 @@ import SettingsTab from "./components/SettingsTab";
 import ChildView from "./components/ChildView";
 import Onboarding from "./components/Onboarding";
 import { Child, SecurityAlert, ParentTab, TrackedContact } from "./types";
+import { 
+  getStatus, 
+  getAlerts, 
+  getContacts, 
+  simulateAlert, 
+  resolveAlert, 
+  updateContactStatus, 
+  resetDb, 
+  setChildConnected as setChildConnectedInApi 
+} from "./lib/api";
 
 export default function App() {
   const [role, setRole] = useState<"selector" | "parent" | "child">("selector");
@@ -38,23 +48,14 @@ export default function App() {
   const fetchState = async () => {
     setNetworkLoading(true);
     try {
-      const res = await fetch("/api/status");
-      const data = await res.json();
-      setChildrenList(data.children || []);
-      setChildConnected(data.childConnected);
+      const statusData = getStatus();
+      setChildrenList(statusData.children || []);
+      setChildConnected(statusData.childConnected);
 
-      const alertsRes = await fetch("/api/alerts");
-      const alertsData: SecurityAlert[] = (await alertsRes.json()) || [];
+      const alertsData = getAlerts();
 
-      try {
-        const contactsRes = await fetch("/api/contacts");
-        if (contactsRes.ok) {
-          const contactsData = await contactsRes.json();
-          setContacts(contactsData || []);
-        }
-      } catch (err) {
-        console.error("Networking error syncing contacts:", err);
-      }
+      const contactsData = getContacts();
+      setContacts(contactsData || []);
 
       // Determine if there is a new unresolved alert that wasn't previously loaded
       if (alertsRef.current.length > 0) {
@@ -88,7 +89,6 @@ export default function App() {
       setAlerts(alertsData || []);
     } catch (e) {
       console.error("Networking error syncing server state:", e);
-      // local fallback if needed
     } finally {
       setNetworkLoading(false);
     }
@@ -115,14 +115,8 @@ export default function App() {
     severity: "high" | "medium" | "low"
   ) => {
     try {
-      const res = await fetch("/api/alerts/simulate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform, category, snippet, severity })
-      });
-      if (res.ok) {
-        await fetchState();
-      }
+      simulateAlert(platform, category, snippet, severity);
+      await fetchState();
     } catch (e) {
       console.error(e);
     }
@@ -131,14 +125,8 @@ export default function App() {
   // Handle resolving an alert
   const handleResolveAlert = async (id: string) => {
     try {
-      const res = await fetch("/api/alerts/resolve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id })
-      });
-      if (res.ok) {
-        await fetchState();
-      }
+      resolveAlert(id);
+      await fetchState();
     } catch (e) {
       console.error(e);
     }
@@ -147,14 +135,8 @@ export default function App() {
   // Handle updating contact safety status
   const handleUpdateContactStatus = async (id: string, safetyStatus: "Trusted" | "Unfamiliar" | "Blocked") => {
     try {
-      const res = await fetch("/api/contacts/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, safetyStatus })
-      });
-      if (res.ok) {
-        await fetchState();
-      }
+      updateContactStatus(id, safetyStatus);
+      await fetchState();
     } catch (e) {
       console.error(e);
     }
@@ -163,11 +145,9 @@ export default function App() {
   // Reset entire simulation state
   const handleResetDemoState = async () => {
     try {
-      const res = await fetch("/api/reset", { method: "POST" });
-      if (res.ok) {
-        await fetchState();
-        setRole("selector");
-      }
+      resetDb();
+      await fetchState();
+      setRole("selector");
     } catch (e) {
       console.error(e);
     }
@@ -175,7 +155,7 @@ export default function App() {
 
   // Callback when a child enters pairing code successfully
   const handlePairingSuccess = async () => {
-    setChildConnected(true);
+    setChildConnectedInApi(true);
     await fetchState();
   };
 

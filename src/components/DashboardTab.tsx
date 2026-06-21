@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import { Child, SecurityAlert } from "../types";
+import { getWeeklySummaryAI } from "../lib/api";
 
 interface DashboardTabProps {
   childrenData: Child[];
@@ -45,11 +46,8 @@ export default function DashboardTab({
   const fetchWeeklySummary = async () => {
     setLoadingSummary(true);
     try {
-      const res = await fetch("/api/weekly-summary");
-      if (res.ok) {
-        const data = await res.json();
-        setAiSummary(data.summary);
-      }
+      const data = await getWeeklySummaryAI();
+      setAiSummary(data.summary);
     } catch (e) {
       console.error("Failed to fetch weekly summary:", e);
     } finally {
@@ -92,7 +90,7 @@ export default function DashboardTab({
     { name: "Chrome", time: "15m", percentage: 5, color: "bg-blue-500", icon: "🌐" }
   ];
 
-  // Quick pre-packaged toxicity templates from common West African schools & online scenarios
+  // Quick pre-packaged toxicity templates from West African schools & online scenarios
   const threatTemplates = [
     { text: "Send me the picture of your school badge or I will post online", label: "Grooming/Extortion", platform: "Instagram", severity: "high" as const },
     { text: "Your boy on the street says you are a dummy. You will run when you see us", label: "Cyberbullying", platform: "WhatsApp", severity: "high" as const },
@@ -106,20 +104,8 @@ export default function DashboardTab({
     const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
     setPairingCode(randomCode);
     setActivePairingCode(randomCode);
-
-    try {
-      // Optional background handshake registration
-      await fetch("/api/generate-code", { 
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({ code: randomCode })
-      });
-    } catch (e) {
-      console.warn("Local storage model sync fallback");
-    } finally {
-      setGeneratingCode(false);
-      setShowPairingModal(true);
-    }
+    setGeneratingCode(false);
+    setShowPairingModal(true);
   };
 
   const handleCopy = () => {

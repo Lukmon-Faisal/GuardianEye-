@@ -4,6 +4,7 @@ import {
   Phone, ShieldAlert, MessageCircleCode, Check, Search, Smartphone 
 } from "lucide-react";
 import { TrackedContact } from "../types";
+import { updateContactStatus, addContact } from "../lib/api";
 
 interface ContactsTabProps {
   contacts?: TrackedContact[];
@@ -85,26 +86,20 @@ export default function ContactsTab({ contacts: propContacts, onRefresh }: Conta
 
   const toggleSafetyStatus = async (id: string, newStatus: "Trusted" | "Unfamiliar" | "Blocked") => {
     try {
-      const res = await fetch("/api/contacts/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, safetyStatus: newStatus })
-      });
-      if (res.ok) {
-        if (onRefresh) {
-          onRefresh();
-        } else {
-          setLocalContacts(prev => prev.map(c => {
-            if (c.id === id) {
-              return { 
-                ...c, 
-                safetyStatus: newStatus,
-                alertsCount: newStatus === "Trusted" ? 0 : c.alertsCount
-              };
-            }
-            return c;
-          }));
-        }
+      updateContactStatus(id, newStatus);
+      if (onRefresh) {
+        onRefresh();
+      } else {
+        setLocalContacts(prev => prev.map(c => {
+          if (c.id === id) {
+            return { 
+              ...c, 
+              safetyStatus: newStatus,
+              alertsCount: newStatus === "Trusted" ? 0 : c.alertsCount
+            };
+          }
+          return c;
+        }));
       }
     } catch (e) {
       console.error(e);
@@ -116,28 +111,18 @@ export default function ContactsTab({ contacts: propContacts, onRefresh }: Conta
     if (!newContactName || !newContactPhone) return;
 
     try {
-      const res = await fetch("/api/contacts/add", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      addContact(newContactName, newContactPhone, newContactRelationship, newContactCarrier);
+      if (onRefresh) {
+        onRefresh();
+      } else {
+        const added: TrackedContact = {
+          id: "c-" + Date.now(),
           name: newContactName,
           phone: newContactPhone,
           networkCarrier: newContactCarrier,
-          relationship: newContactRelationship
-        })
-      });
-      if (res.ok) {
-        if (onRefresh) {
-          onRefresh();
-        } else {
-          const added: TrackedContact = {
-            id: "c-" + Date.now(),
-            name: newContactName,
-            phone: newContactPhone,
-            networkCarrier: newContactCarrier,
-            relationship: newContactRelationship,
-            safetyStatus: "Trusted",
-            alertsCount: 0,
+          relationship: newContactRelationship,
+          safetyStatus: "Trusted",
+          alertsCount: 0,
             lastMessaged: "Never"
           };
           setLocalContacts(prev => [added, ...prev]);
@@ -145,7 +130,6 @@ export default function ContactsTab({ contacts: propContacts, onRefresh }: Conta
         setNewContactName("");
         setNewContactPhone("");
         setShowAddModal(false);
-      }
     } catch (e) {
       console.error(e);
     }
